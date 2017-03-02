@@ -1,4 +1,3 @@
-#Question 1
 
 #Let's Begin
 #download and load trip data for September 2015 for Green Taxis from the URL
@@ -16,8 +15,6 @@ nrow(data)
 ncol(data)
 
 
-#Question 2
-
 #Distribution curve
 hist (data$Trip_distance, breaks = 5000, col = 'black',xlab = 'Trip Distance'
       ,main = 'Histogram of Trip distance vs frequency')
@@ -33,7 +30,6 @@ h2 <- hist (data$Trip_distance
 #Standard Deviation of the trip distance
 sd(Trip_distance)
 
-#Question 3
 
 #Data Cleaning
 
@@ -60,9 +56,9 @@ clean_data <- function(data_set) {
 fresh_data <- clean_data(data)
 
 
-#mean and median trip distance grouped by hour of day
+# Mean and Median trip distance grouped by hour of day
 
-#changing the format of date and time of pickup and drop off
+# Changing the format of date and time of pickup and drop off
 
 fresh_data$Time_Pickup <- format(as.POSIXct(fresh_data$lpep_pickup_datetime)
                                  ,format = "%H:%M:%S")
@@ -83,33 +79,33 @@ fresh_data$Time_Dropoff <- as.numeric(times(fresh_data$Time_Dropoff)) * 60 * 24
 
 fresh_data$Time_duration <- abs(fresh_data$Time_Dropoff-fresh_data$Time_Pickup)
 
-#Variable
+# New Variable
 fresh_data$Speed <- fresh_data$Trip_distance/(fresh_data$Time_duration/60)
 
 # Filter unknown data out
 fresh_data <- fresh_data[!(fresh_data$Time_duration==0),]
 
 
-#Using the package data.table
+# Using the package data.table
 library(data.table)
 
-#Using the data.table function for faster development for short and flexible syntax
+# Using the data.table function for faster development for short and flexible syntax
 fresh_data <- data.table(fresh_data)
 
 
 attach(fresh_data)
-#converting the column back to H:M:S fomrat
+# Converting the column back to H:M:S fomrat
 fresh_data$Time_Pickup <- format(as.POSIXct(fresh_data$lpep_pickup_datetime)
                                  ,format = "%H:%M:%S")
 
-#grouping by hour the mean and median trip distance 
+# Grouping by hour the mean and median trip distance 
 table <- fresh_data[,list(mean = mean(Trip_distance)
                           , median = median(Trip_distance))
                     ,by = list(hour(as.POSIXct(fresh_data$Time_Pickup 
                                                ,format = "%H:%M:%S")))
                     ]
 
-#printing the table
+# Printing the table
 table
 
 plot(table$hour,table$mean, type = 'b'
@@ -118,14 +114,14 @@ plot(table$hour,table$mean, type = 'b'
      , main = 'Mean Distance covered per hour'
      , col = 'red')
 
-#JFK airport was chosen at random and an analysis was conducted on what sort of 
-#transactions take place within those coordinates
+# JFK airport was chosen at random and an analysis was conducted on what sort of 
+# transactions take place within those coordinates
 
-#Coordinates were pick from the internet and a new data set was created on the basis
+# Coordinates were pick from the internet and a new data set was created on the basis
 # of 4 square coordinates surrounding the airport.
 
 
-#map_data JFK airport
+# map_data JFK airport
 
 map_data <- subset(fresh_data, (fresh_data$Pickup_latitude < 40.64999
                                 | fresh_data$Dropoff_latitude < 40.64999))
@@ -139,7 +135,7 @@ map_data <- subset(map_data, (map_data$Pickup_longitude < -73.796883
 map_data <- subset(map_data, (map_data$Pickup_longitude > -73.771305
                               | map_data$Dropoff_longitude > -73.771305))
 
-#Count of transactions that fall within the coordinates of JFK airport
+# Count of transactions that fall within the coordinates of JFK airport
 
 qplot(1:nrow(map_data), map_data$Fare_amount)
 
@@ -150,17 +146,17 @@ summary(map_data)
 
 summary(fresh_data)
 
-#Question 4
+# Question 4
 
-#Data Modelling
+# Data Modelling
 
-#Build a derived variable for tip as a percentage of the total fare
+# Build a derived variable for tip as a percentage of the total fare
 
 # tip was calculated as a percent of the ratio of tip to total amount
 fresh_data$Tip_percent <- 100*fresh_data$Tip_amount/fresh_data$Total_amount
 
-#Creating a random sample of test and train data of equal no. of observations for our
-#predictive models
+# Creating a random sample of test and train data of equal no. of observations for our
+# predictive models
 
 set.seed(10)
 test <- sample(1:nrow(fresh_data), 10000)
@@ -169,15 +165,15 @@ train_set <- fresh_data[train,]           # Training set of data
 test_set <- fresh_data[test,]             # Testing set of data
 
 
-#test,train 2
-#test <- (1:1000)
-#train <- (1:1000)
-#train_set <- fresh_data[train,]
-#test_set <- fresh_data[test,]
+# test,train 2
+# test <- (1:1000)
+# train <- (1:1000)
+# train_set <- fresh_data[train,]
+# test_set <- fresh_data[test,]
 
 
-#CROSS VALIDATION
-#Load the caret package to train the training set by repeated 10-fold cross validation process
+# CROSS VALIDATION
+# Load the caret package to train the training set by repeated 10-fold cross validation process
 library(caret)
 fitControl <- trainControl(method = "repeatedcv",  #Repeated Cross Validation
                            number = 10,            
@@ -187,7 +183,7 @@ fitControl <- trainControl(method = "repeatedcv",  #Repeated Cross Validation
 
 
 
-#random forest model
+# random forest model
 library(randomForest)
 
 
@@ -205,8 +201,8 @@ importance(rfout)
 
 ## Regression Models
 
-#Model 1
-#random forest model
+# Model 1
+# random forest model
 rfout <- randomForest(Tip_percent ~ Speed + Payment_type + Time_duration
                       + Total_amount + Passenger_count + Trip_distance + Fare_amount
                       ,train_set
@@ -214,21 +210,21 @@ rfout <- randomForest(Tip_percent ~ Speed + Payment_type + Time_duration
                       ,trcontrol = fitControl )
 rfout
 
-#Plotting the error rate vs the number of tree
+# Plotting the error rate vs the number of tree
 plot(rfout, main = "Error vs No. of Tree")
 
-#Predicting the rf model
+# Predicting the rf model
 rfpredict <- predict(rfout, test_set)
 
 
 # Model 2
-#Linear model multivariate
+# Linear model multivariate
 lmout <- lm(Tip_percent ~ Speed + Payment_type + Time_duration
             + Total_amount + Passenger_count + Trip_distance + Fare_amount
             ,data =  train_set)
 plot(lmout)
 
-#Predicting the lm model
+# Predicting the lm model
 lmpredict <- predict(lmout
                      ,newdata = test_set
                      ,se.fit = TRUE
@@ -237,8 +233,8 @@ lmpredict <- predict(lmout
 
 summary(lmout)
 
-#Using backward elimination to fit a better model
-#Choose accordingly whose p-value is high and eliminate, I had encountered Speed,Passenger_count 
+# Using backward elimination to fit a better model
+# Choose accordingly whose p-value is high and eliminate, I had encountered Speed,Passenger_count 
 # and Time_duration the highest number of times.
 lmout <- update(lmout,Tip_percent~. -Speed)
 summary(lmout)
@@ -247,18 +243,18 @@ summary(lmout)
 lmout <- update(lmout,~.-Time_duration)
 summary(lmout)
 
-#Aim is to find the best possible model that only includes significant factors.
-#Its acheived by the process of backward elimination. We remove the insignificant 
-#variables whose p-values (p-value>0.05 for 95% C.I.) are high and optimize the model
+# Aim is to find the best possible model that only includes significant factors.
+# Its acheived by the process of backward elimination. We remove the insignificant 
+# variables whose p-values (p-value>0.05 for 95% C.I.) are high and optimize the model
 
-#Final Model Equation
+# Final Model Equation
 # Tip_percent = 20.05 - 9.82*Payment_type + 1.61*Total_amount - 0.2786*Trip_distance
 #               - 1.736*Fare_amount
 
 
 # Model 3
 
-#Recursive Partitioning and Regression Trees (rpart) model
+# Recursive Partitioning and Regression Trees (rpart) model
 library(rpart)
 rpartout <- rpart(Tip_percent ~ Speed + Payment_type + Time_duration
                   + Total_amount + Passenger_count + Trip_distance + Fare_amount
@@ -266,11 +262,11 @@ rpartout <- rpart(Tip_percent ~ Speed + Payment_type + Time_duration
                   , method = "anova")
 
 
-#Predicting rpart model
+# Predicting rpart model
 p1 <- predict(rpartout, test_set)
 
 
-#Absolute Mean Error
+# Absolute Mean Error
 MAE <- function(actual, predict){
   error <- abs(actual - predict)        
   return(mean(error))
@@ -282,7 +278,7 @@ MAE(test_set$Tip_percent,rfpredict)
 
 MAE(test_set$Tip_percent,lmpredict$fit)
 
-#Root Mean squared error
+# Root Mean squared error
 RMSE <- function(actual, predict){
   sqrt(mean((actual - predict)^2))
 }
@@ -313,33 +309,33 @@ accuracy(test_set$Tip_percent,rfpredict)
 
 accuracy(test_set$Tip_percent,lmpredict$fit)
 
-#Question 5
+# Question 5
 
 
-##Building a derived varibale for avg speed over a ride.
+## Building a derived varibale for avg speed over a ride.
 
-#library chron should be pulled
+# library chron should be pulled
 library(chron)
 
-#Variable
+# Variable
 fresh_data$Speed <- fresh_data$Trip_distance/(fresh_data$Time_duration/60)
 
-#Cleaning of data set, assuming that speeds above 200 mphr isn't realistic
+# Cleaning of data set, assuming that speeds above 200 mphr isn't realistic
 fresh_data <- fresh_data[(fresh_data$Time_duration < 200 
                           & fresh_data$Time_duration > 1),]
 
 
-#mean speed per week
+# Mean speed per week
 attach(fresh_data)
 
 table1 <- aggregate(list(Mean_Speed = fresh_data$Speed), 
                     list(Week_of_month = cut(fresh_data$Date_Pickup, "7 days")), 
                     mean)
 
-#Print Table of WEEK VS MEAN SPEED
+# Print Table of WEEK VS MEAN SPEED
 table1
 
-#created small subsets to compare the avereage speeds per week
+# Created small subsets to compare the avereage speeds per week
 t_sample1 <- subset(fresh_data, 
                     fresh_data$Date_Pickup> "2015-09-01" 
                     & fresh_data$Date_Pickup <= "2015-09-08")
@@ -357,7 +353,9 @@ t_sample4 <- subset(fresh_data,
                     & fresh_data$Date_Pickup <= "2015-09-28")
 
 hist(t_sample1$Speed, breaks = 1000, xlim = c(0,50))
+
 # T- test to check if the null hypothesis holds true
+
 t.test(t_sample1$Speed, t_sample2$Speed
        , alternative = "two.sided"
        , mu = 0
@@ -365,15 +363,15 @@ t.test(t_sample1$Speed, t_sample2$Speed
        , var.equal = FALSE
        , conf.level = 0.95)
 
-#p-value is less than 0.05 thus suggesting that the null hypothesis does not hold true
-#For one it could be the number of people moving in the city early september, that's
+# p-value is less than 0.05 thus suggesting that the null hypothesis does not hold true
+# For one it could be the number of people moving in the city early september, that's
 # when usually a new season/semester begins. Plus a holiday in early september can 
 # disrupt the travel and traffic schedules in the week
 
-#Another factor is correctness of the data provided, a lot of incorrect values may have
-#not lead us in the right direction. 
+# Another factor is correctness of the data provided, a lot of incorrect values may have
+# not lead us in the right direction. 
 
-#grouping by hour, mean trip speed 
+# grouping by hour, mean trip speed 
 fresh_data$Time_Pickup <- format(as.POSIXct(fresh_data$lpep_pickup_datetime)
                                  ,format = "%H:%M:%S")
 
@@ -383,7 +381,7 @@ table2 <- fresh_data[,list(mean = mean(Speed))
                      ]
 table2
 
-#Plotting a graph for average trip speed as a function of time of day
+# Plotting a graph for average trip speed as a function of time of day
 plot(table2
      , type = 'o'
      , col = "red"
@@ -391,12 +389,12 @@ plot(table2
      , ylab = "Avg trip speed"
      , main = "Avg Speed in a day")
 
-#From the graph it is clear that the average speed reaches maximum at early morning
+# From the graph it is clear that the average speed reaches maximum at early morning
 # One reason to build on this hypothesis is that traffic in the morning isn't that high
 # thus giving clearer roads for drivers to drive through.
 # One reason might be that people who have to travel long distances have to 
 # pass a highway (where speeds are high usually) which 
-#subsequently proves the higher speed range.
+# subsequently proves the higher speed range.
 # Another point that can be noted here is that the speed at night isn't as high as
 # early morning is because of the fact that on weekends, people like to stay out, thus 
 # incresing the traffic on roads and keeping it lower than the peak. 
