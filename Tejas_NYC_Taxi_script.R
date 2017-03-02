@@ -146,7 +146,6 @@ summary(map_data)
 
 summary(fresh_data)
 
-# Question 4
 
 # Data Modelling
 
