@@ -3,10 +3,10 @@
 #download and load trip data for September 2015 for Green Taxis from the URL
 
 
-#data <- read.csv(url("https://s3.amazonaws.com/nyc-tlc/trip+data/green_tripdata_2015-09.csv"))
+data <- read.csv(url("https://s3.amazonaws.com/nyc-tlc/trip+data/green_tripdata_2015-09.csv"))
 
 #loading it locally
-data <- read.csv("C:/Users/Rasika/Downloads/green_tripdata_2015-09.csv")
+#data <- read.csv("C:/Users/Rasika/Downloads/green_tripdata_2015-09.csv")
 data <- green_tripdata_2015_09
 #Number of Rows
 nrow(data)
