@@ -1,10 +1,5 @@
 ---
 title: "NYC Taxi Project"
-output:
-  word_document: default
-  html_notebook: default
-editor_options: 
-  chunk_output_type: console
 ---
 
 # NYC Taxis Tip Prediction
