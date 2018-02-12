@@ -394,15 +394,18 @@ gc()
 corrplot(cor(num.df[,-16]), method = "number",tl.cex = 0.5,type="lower",diag=FALSE)
 ```
 
-# Redo
+## Relations
 
-According to this correaltion plot, 
+According to this correlation plot,
 
-1) The trip distance and fare amount is positively corelated, and so is the total amount. Its understandable as higher the distance travelled, the higher the fare amounts to.
+1)	The trip distance and fare amount are positively corelated, and so is the total amount. It's understandable as higher the distance travelled, the higher the fare amounts to.
 
-2) Surprisingly the tip amount isn't that highly related to the fare amount, this might be because of the number of tips recorded for cash type payment is NULL.
+2)	Surprisingly the tip amount isn't that highly related to the fare amount, this might be because of the number of tips recorded for cash type payment is 0.
 
-3) The trip type is highly related to the ratecode id and the other taxes, which makes perfect sense as pointed out earlier.
+3)	The derived variable trip duration has high correlation coefficients with trip distance, fare, total and tip amounts.
+
+4)	The trip type is highly related to the ratecode id and the other taxes, which makes perfect sense as pointed out earlier.
+
 
 # Feature engineering: new derived features
 
