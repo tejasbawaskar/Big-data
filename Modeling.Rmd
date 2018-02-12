@@ -1,0 +1,280 @@
+---
+title: "Model Building"
+author: "Tejas Bawaskar"
+date: "August 1, 2017"
+output: word_document
+editor_options: 
+  chunk_output_type: console
+---
+Continued from data exploratory / data cleaning file
+
+## Models
+
+```{r, echo=FALSE, include=FALSE}
+library(car)
+library(e1071)
+library(caret)
+library(randomForest)
+library(rpart)
+library(anytime)
+```
+
+
+```{r}
+clean_datetime <- df[,-c(2,3,19)]
+# Selecting the top variables from the list by using p-value.
+summary(lm(Tip_percent ~.,data=clean_datetime[sample(nrow(clean_datetime),100000) ,]))
+
+# check for multicollinearity
+vif(lm(Tip_percent ~.,data=clean_datetime))
+
+# Check for alias
+alias(lm(Tip_percent ~.,data=clean_datetime))
+
+# After removing the alias, we check for vif
+vif(lm(Tip_percent ~.,data=clean_datetime[,-c(16)]))
+
+# A vif value above 1 indicates the predictors are slightly correlated. A vif between 5 and 10 indicates high correlation that maybe problematic. And anything above 10, it can be concluded that the regression coefficients aren't correct/poorly estimated. To solve it standardizing the continuous predictors can be used, if not, we would have to rmove the highly correlated variables.
+
+
+# From the variables we can notice that Trip distance, fare amount, mta tax, trip type and improvement surcharge have high vif's. This is due to the fact that these variables are highly correlated and can be seen from the correlation plot. 
+
+# Mean absolute error
+MAE <- function(actual, predict){
+error <- abs(actual - predict)
+return(mean(error))
+}
+
+#Root Mean squared error
+RMSE <- function(actual, predict){
+sqrt(mean((actual - predict)^2))
+}
+
+# Accuracy
+accuracy <- function(actual, predict){
+    count = 0
+    ncount = 0
+    error = abs(actual - predict)
+      for( i in 1:length(actual)){
+        if (error[i] <= 1) {count = count + 1} 
+        else( ncount = ncount + 1)
+        }
+    acc <- 100*count/(ncount + count)
+  return(acc)
+}
+
+```
+
+From this we notice that the best variables that have p-values less than 0.05 are;
+VendorID, Pickup_longitude, Pickup_latitude, Dropoff_longitude, Dropoff_latitude, Passenger_count, Trip_distance, Fare_amount, Extra, MTA_tax, Tip_amount, Tolls_amount
+
+
+### Creating training & validation subsets
+
+Since there are nearly 678000 observations in this dataset, it would make sense to randomly subset a sample of these observations for our model.
+
+
+```{r}
+set.seed(789)
+
+#using just a sample of this to run the various models
+
+clean_datetime.test <- clean_datetime[sample(nrow(clean_datetime), 10000), ]
+clean_datetime.train <- clean_datetime[sample(nrow(clean_datetime), 10000), ]
+clean_datetime.val <- clean_datetime[sample(nrow(clean_datetime), 2000), ]
+summary(clean_datetime.test$Tip_percent)
+summary(clean_datetime.train$Tip_percent)
+summary(clean_datetime.val$Tip_percent)
+
+```
+
+### Construction of related models and tuning them subsequently
+
+#### Construction of stacked ensemble model (Random Forest)
+
+```{r}
+# Random forest
+
+# Grid/Manual Search
+control <- trainControl(method="cv", number=5, search="grid")
+x = floor(sqrt(ncol(clean_datetime)))
+tunegrid <- expand.grid(.mtry=c(x-2):(x+2))
+modellist <- list()
+for (ntree in c(10,50,100,500)) {
+	set.seed(21)
+	fit <- train(Tip_percent ~ VendorID + Pickup_longitude + Pickup_latitude + Dropoff_longitude + Dropoff_latitude + Passenger_count + Trip_distance + Fare_amount + Extra + MTA_tax + Tip_amount + Tolls_amount
+	             , data=clean_datetime.train
+	             , method="rf"
+	             , metric='RMSE'
+	             , tuneGrid=tunegrid
+	             , trControl=control
+	             , ntree=ntree)
+	
+	key <- toString(ntree)
+	modellist[[key]] <- fit
+}
+
+# compare results
+results <- resamples(modellist)
+summary(results)
+dotplot(results)
+plot(fit)
+
+# Here it seems that once the ntree crosses 100, it would tend to overfit the data which is undesirable. The number of variables selected is 6, which i belive is the best combination of mtry and ntree.
+
+rf.model <- randomForest(Tip_percent ~ VendorID + Pickup_longitude + Pickup_latitude + Dropoff_longitude + Dropoff_latitude + Passenger_count + Trip_distance + Fare_amount + Extra + MTA_tax + Tip_amount + Tolls_amount
+                      , data = clean_datetime.train
+                      , ntree = 100
+                      , mtry = 6
+                      , replace = TRUE
+                      , nodesize = 5)
+
+importance(rf.model)
+rf.predict <- predict(rf.model,clean_datetime.test)
+
+#Predict the outcome
+rf.predict <- predict(rf.model,clean_datetime.test)
+
+#Absolute Mean Error of random forest model
+rf.mae <- MAE(clean_datetime.test$Tip_percent,rf.predict)
+
+#RMSE of rforest model
+rf.mse <- RMSE(clean_datetime.test$Tip_percent,rf.predict)
+
+#Accuracy of the model
+rf.acc <- accuracy(clean_datetime.test$Tip_percent,rf.predict)
+
+```
+
+#### Linear Model
+
+```{r}
+#Model 1 Linear Regression
+# To solve the multicollinearity issue, standardizing the continuous predictors can be used, but after trying it (standardizing/normalizing) the vif's values were unaffected. While building the linear model, we would have to subset variables that are highly related. 
+
+lm.model <- lm(Tip_percent ~ Dropoff_longitude + Dropoff_latitude + Fare_amount + Extra + MTA_tax + Tolls_amount, data = clean_datetime.train)
+
+plot(lm.model)
+summary(lm.model)
+
+# All vif' are below 5
+vif(lm.model)
+
+# this is the best model for linear regression
+
+# -2.316e+02 - 5.779*Dropoff_longitude - 7.527*Dropoff_latitude - -4.278e-01*Fare_amount - 4.972e-01*Extra + 3.064*MTA_tax + 2.459*Tip_amount - -3.670e-01*Tolls_amount
+
+lm.predict <- predict(lm.model,clean_datetime.test,se.fit = TRUE, interval = "confidence",level = 0.95)
+
+# Absolute Mean error of lm model
+lm.mae <- MAE(clean_datetime.test$Tip_percent,lm.predict$fit)
+
+#RMSE of lm model
+lm.mse <- RMSE(clean_datetime.test$Tip_percent,lm.predict$fit)
+
+#Accuracy of the model
+lm.acc <- accuracy(clean_datetime.test$Tip_percent,lm.predict$fit)
+
+```
+
+#### SVM Model
+
+```{r}
+
+# Model 2 SVM
+# Using grid search technique, we can find the optimal cost and gamma values
+obj <- tune(svm, Tip_percent~VendorID + Pickup_longitude + Pickup_latitude + 
+    Dropoff_longitude + Dropoff_latitude + Passenger_count + 
+    Trip_distance + Fare_amount + Extra + MTA_tax + Tip_amount + 
+    Tolls_amount, data = clean_datetime.train,
+            validation.x = clean_datetime.val,
+              ranges = list(gamma = 2^(-1:1), cost = 2^(2:4)),
+              tunecontrol = tune.control(sampling = "fix")
+             )
+
+obj
+
+# Model tuned
+# Since we have high multicollinearity among our features, we will be using the linear kernel. Also selecting the features that have p-values less than 0.05
+svm.model <- svm(Tip_percent ~ VendorID + Pickup_longitude + Pickup_latitude + 
+    Dropoff_longitude + Dropoff_latitude + Passenger_count + 
+    Trip_distance + Fare_amount + Extra + MTA_tax + Tip_amount + 
+    Tolls_amount, kernel="linear", cost=16, gamma=0.5, clean_datetime.train)
+
+# Use the predictions on the data
+svm.predict <- predict(svm.model, clean_datetime.test)
+
+#Absolute Mean Error of SVM
+svm.mae <- MAE(clean_datetime.test$Tip_percent,svm.predict)
+
+#RMSE of SVM model
+svm.mse <- RMSE(clean_datetime.train$Tip_percent,svm.predict)
+
+#Accuracy of the model
+svm.acc <- accuracy(clean_datetime.test$Tip_percent,svm.predict)
+
+```
+
+
+#### Rpart Model
+
+```{r}
+#Model 3
+#Recursive Partitioning and Regression Trees (rpart) model
+
+rpartout <- rpart(Tip_percent ~ VendorID + Pickup_longitude + Pickup_latitude + 
+    Dropoff_longitude + Dropoff_latitude + Passenger_count + 
+    Trip_distance + Fare_amount + Extra + MTA_tax + Tip_amount + 
+    Tolls_amount,data = clean_datetime.train,method = "poisson")
+
+rpart.predict <- predict(rpartout, clean_datetime.test)
+
+#Absolute Mean Error of rpart model
+rpart.mae <- MAE(clean_datetime.test$Tip_percent,rpart.predict)
+
+#RMSE of rpart model
+rp.mse <- RMSE(clean_datetime.test$Tip_percent,rpart.predict)
+
+# Accuracy
+rp.acc <- accuracy(clean_datetime.test$Tip_percent,rpart.predict)
+```
+
+#### Evaluation with k-fold cross-validation
+
+```{r}
+fitControl <- trainControl(method = "cv" #Cross Validation
+                           , number = 10
+                           , search = "random")
+
+lm.kmodel <- train(Tip_percent ~ Dropoff_longitude + Dropoff_latitude + Fare_amount + Extra + MTA_tax + Tip_amount + Tolls_amount, data=clean_datetime.train, trControl=fitControl, method="lm")
+
+lm.kpredict <- predict(lm.kmodel,clean_datetime.test,se.fit = TRUE
+,interval = "confidence"
+,level = 0.95)
+
+#Absolute Mean Error of lm model Kfolds
+lmk.mae <- MAE(clean_datetime.test$Tip_percent,lm.kpredict)
+
+#RMSE of lm model kfolds
+lmk.mse <- RMSE(clean_datetime.train$Tip_percent,lm.kpredict)
+
+# Accuracy
+lmk.acc <- accuracy(clean_datetime.test$Tip_percent,lm.kpredict)
+
+```
+
+#### Comparing the MSE, RMSE and Accuracy
+
+```{r}
+
+compare.model<-data.frame(name = c("RPART","Linear Regression","SVM","Linear Regression(Kfolds)","RandomForest")
+                          ,MAE = c(rpart.mae, lm.mae, svm.mae, lmk.mae, rf.mae)
+                          ,RMSE = c(rp.mse, lm.mse, svm.mse, lmk.mse, rf.mse)
+                          ,Accuracy = c(rp.acc, lm.acc, svm.acc, lmk.acc, rf.acc))
+compare.model
+
+#From this we can see Random FOrest is the best
+```
+
+
+
