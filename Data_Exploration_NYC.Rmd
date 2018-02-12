@@ -1,0 +1,516 @@
+---
+title: "NYC Taxi Project"
+output:
+  word_document: default
+  html_notebook: default
+editor_options: 
+  chunk_output_type: console
+---
+
+# NYC Taxis Tip Prediction
+
+Background:
+I was taking a cab on my way to my house from the airport, being unaware that tipping was customary here in the US, I initially refused to pay the driver a tip. After much contemplation, I gave him a dollar on $59 fare amount. I realized this was not correct and was rude on my behalf. The culture here is completely different from where I grew up. After having several conversations with cab drivers, I came to realize that they usually aren't tipped well even after giving a perfect ride to riders.
+
+Proposal:
+I want to help cab drivers, earn a bit more on tips for their hard work and time spent driving. Hence, I started working on a dataset for NYC taxi drivers that would help them analyze and predict how much tip they would receive from drivers given their status (such as location, time of day, day of the week, distance, time traveled etc.).
+
+```{r pressure, echo=FALSE, include=FALSE}
+library(lubridate)
+#library(rvest)
+library(plyr)
+library(dplyr)
+#library(leaflet)
+library(geosphere)
+library(psych)
+library(corrplot)
+library(caret)
+#library(randomForest)
+library(rpart)
+library(e1071)
+library(ggplot2)
+library(Rmisc)
+library(gridExtra)
+library(anytime)
+library(ggmap)
+library(BBmisc)
+```
+
+```{r  , echo=TRUE}
+df <- read.csv("C:\\Users\\Tejas\\Documents\\green_tripdata_2015-09.csv")
+
+nrow(df) #number of rows in the dataset
+ncol(df) #number of columns in the dataset
+colnames(df) #column names
+summary(df) #summary of the dataset
+
+# checking for NA
+colSums(is.na(df[,]))
+
+# We can see Ehail_fee has no data hence we will eliminate it
+df <- subset(df,select = -c(Ehail_fee))
+
+# We can also see that only 4 observations are missing in Trip_type of 1.49 million observations
+df <- df[complete.cases(df),]
+
+# Checking the datatypes of each variable in the dataframe 
+sapply(df, class)
+
+```
+
+This gives us an understanding that the data types for 'lpep_pickup_datetime' and 'Lpep_dropoff_datetime' aren't in the format that we want. Rest of the variables are fine.
+
+# Data Preprocessing and Exploratory Data Analysis
+
+Check for outliers
+Since a normal boxplot without normalizing wasn't visually easily to interpret with all the variables simultaneously. All the numerical variables are plotted after normalizing them between 0 and 1.
+
+```{r  , echo=TRUE}
+# variables were then scaled to better understand their behavior
+nums <- sapply(df, is.numeric) 
+num.df <- df[ , nums]
+norm.df <- normalize(num.df, method = 'range', range = c(0,1))
+#boxplot(norm.df, names=colnames(norm.df), las = 2)
+ggplot(stack(norm.df), aes(x = ind, y = values)) +
+    geom_boxplot() + theme(axis.text.x =
+                               element_text(size  = 10,
+                                            angle = 45,
+                                            hjust = 1,
+                                            vjust = 1)) + labs (x = 'Variables',
+                                                                y = 'Values',
+                                                                title = 'Boxplot of all Variables')
+```
+
+This plot shows us that, there are a number of outliers for variables like, ''...
+We will look into Trip Distance as it is the first variable that has a high number of outliers.
+
+*This boxplot was plotted with all variables normalized between 0 and, as unscaled variables didn't give a proper a visualization.
+
+```{r  , echo=TRUE}
+gc()
+#Lets look at Trip Distance as it shows a high percentage of outliers
+hist(df$Trip_distance, breaks = 5000, col = 'black',xlab = 'Trip Distance'
+     ,main = 'Histogram of Trip distance vs frequency')
+
+```
+
+Since the figure is quite vague, for visualization purposes, all the outliers are excluded by limiting the x values to x = mean +/- standard deviation*3 to give a clear idea about the distribution.
+
+```{r  , echo=TRUE}
+hist (df$Trip_distance
+            ,breaks = 5000
+            ,col = "blue"
+            ,xlab = 'Trip Distance'
+            ,main = 'Trip distance Frequency'
+            ,xlim = c(0,mean(df$Trip_distance) + 3*sd(df$Trip_distance))
+            ,freq = TRUE)
+```
+
+It can be inferred that the graph is non-normal i.e. right skewed and the mode < median < mean. Here the t-statistic will hold valid because of its robustness to deviations from normality. The skewness can be explained as the distance starts from zero and will always have a very high upper limit.
+
+Hypothesis
+The distance data isn't random. For it to be random the graph would have been normally distributed. The relation might be affected by the fact that people that travel long distances can't afford to pay the fare for a cab. Instead they use the public transportations system such as bus, metro etc. People who go to work on a daily basis would prefer a cheaper option. Moreover the cab drivers wouldn't want to travel to a remote place from where they wouldn't get a return fare. It can be pointed out that there is an anomaly seen in the graph. There are number of rides where the distance covered is zero which is incorrect. We thus need to clean the data through for better predictions/results.
+
+Plot - Trip Distance v/s Tip/Total amt.
+From the graph, we notice that a good percentage of tip to total amt ratio is high in case of short trips. Drivers are better of driving short distances to let the tips keep coming.
+
+
+```{r  , echo=FALSE}
+
+ggplot(df[df$Tip_amount > 0,], aes(x = Trip_distance)) + 
+  geom_point(aes(y = Tip_amount/Total_amount), colour = 'grey') +
+  xlim(0.1,mean(df$Trip_distance) + 3*sd(df$Trip_distance)) +
+  ylim(0, 1) +
+  theme_bw() +
+  labs(x = 'Trip Distance', y = 'Tip / Total Amount')
+
+```
+
+
+```{r  , echo=FALSE}
+############################################################################
+#hist(df$Total_amount) #kind of normally distributed
+#hist(df$Fare_amount)#kind of normally distributed
+
+#Using log transform
+#hist(log(df$Trip_distance))
+#hist(log(df$Total_amount))
+#hist(log(df$Fare_amount))
+#Using the log transform we get a normally distributed graph
+############################################################################
+```
+
+Airport trips - According to the data dictionary, it is mentioned that the rate code ids are
+
+ 1 = Standard rate
+ 
+ 2 = JFK
+ 
+ 3 = Newark
+ 
+ 4 = Westchester
+ 
+ 5 = Negotiated fare
+ 
+ 6 = Group ride
+
+```{r  , echo=TRUE}
+plyr::count(df, 'RateCodeID')
+# Upon analysis it was found that ratecode id 99 was an error
+df <- subset(df,df$RateCodeID < 7)
+
+p1 <- ggplot(df[df$Payment_type == 1,], aes(y = Tip_amount, x = factor(RateCodeID), fill = factor(RateCodeID))) +   
+  theme_light() +
+  stat_summary(fun.y = mean, # calc mean of all observations for the month
+               geom = "bar") + guides(fill=FALSE) +
+  scale_color_manual('') +
+  labs(x = 'Rate Code ID', y = 'Mean Tip', fill = "ID's")
+
+p2 <- ggplot(df[df$Payment_type == 1,], aes(y = Trip_distance, x = factor(RateCodeID), fill = factor(RateCodeID))) +   
+  theme_light() +
+  stat_summary(fun.y = mean, # calc mean of all observations for the month
+               geom = "bar") +
+  scale_color_manual('') +
+  labs(x = 'Rate Code ID', y = 'Mean Distance Travelled', fill = "ID's") +
+  scale_fill_discrete(labels = c('Standard rate' ,'JFK' ,'Newark' ,'Westchester' ,'Negotiated fare','Group ride'))
+
+
+multiplot(p1, p2, cols=2)
+```
+
+*The graph plotted above is a filtered dataset with observations that have payment type as Credit Card. Later, it was revealled that other payment types had an anamoly that needs to be fixed.
+
+This plot shows the average tip recieved from differnt rate code ID's. This gives us a better idea of how drivers can earn a bit more than their usual earnings. Tips recieved from airports are nearly as 10x their standard tip. This could be accounted for a number of reasons 1) The distance travelled from airports to their respective destinations will be higher than a normal ride, mainly because of the location of the airports being local. Thus making the commuting distance more and suubsequently higher fares. 2) The local taxes are levied on riders for catching a cab from the airport, thus contributing to the total amount and subsequently higher tips. 3) Tourists who come to visit, might be unaware of how much to tip the driver, driving the mean tip even higher.
+
+Rate code ID 6 though showing some distance travlled, is showing almost zero tip recieved. ID 6 corresponds to group ride. Let's dive into it a bit, by looking the type of payment for each rate code ID.
+
+```{r  , echo=TRUE}
+temp <- with(df,table(df$RateCodeID, df$Payment_type))
+rownames(temp) <- c('Standard rate','JFK','Newark','Westchester','Negotiated fare','Group ride')
+colnames(temp) <- c('Credit card','Cash','No charge','Dispute','Unknown')
+
+t1 <- ttheme_default(core=list(
+  fg_params=list(fontface=c(rep("plain", 5), "bold.italic")),
+  bg_params = list(fill=c(rep(c("grey95", "grey90"),
+                              length.out=5), "#6BAED6"),
+                   alpha = rep(c(1,0.5), each=10))
+))
+
+## Cross table of the count of rides w.r.t the payment type and rate code id.
+grid.table(temp, theme = t1)
+```
+
+Since a majority of the payment done in group rides (rate id 6) is done by cash, the tips aren't recorded.
+
+Upon further analysis, I found that, the tip amount recorded is zero for all cases but one. All the transactions which are not electronic have zero tips.
+
+```{r  , echo=TRUE}
+temp1 <- plyr::count(df, vars = 'Payment_type')
+temp2 <- plyr::count(df[df$Tip_amount == 0,], vars = 'Payment_type')
+
+temp <- merge(temp1,temp2,'Payment_type')
+colnames(temp) = c('Payment_type','Tips Recorded', 'Tips (=$0) Recorded')
+temp$Payment_type <- c('Credit card','Cash','No charge','Dispute','Unknown')
+
+grid.table(temp, theme=t1)
+```
+
+It is understood that if passengers pay by cash, their tips won't be recorded by drivers so as to avoid taxes. Ironically, all the other types of trips also have zero tips. It would be sensible to remove those points as they will have no good impact on our predictions.
+
+From the data provided, we can derive a few variables of our own.
+
+```{r  , echo=TRUE}
+#Converting Trip Duratians to secs
+x1 <- strptime(df$lpep_pickup_datetime, "%Y-%m-%d %H:%M:%OS")
+x2 <- strptime(df$Lpep_dropoff_datetime, "%Y-%m-%d %H:%M:%OS")
+df$trip_duration <- as.numeric(x2-x1,units="secs") #this is a derived feature
+
+#dividing into hours
+time.category <- with(df, ifelse(trip_duration <= (4*3600), 1, 
+                                 ifelse(trip_duration >= 5*3600 & trip_duration <= 24*3600, 2, 3))
+)
+aggregate(df$trip_duration,by=list(time.category),FUN=length)
+```
+
+As can be seen 8382 rides are between 5 hrs and 24 hrs  and 187 rides are above 24 hours. These are obviously outliers as passengers don't travel usually for more than 2 hours, as an exception I will consider 4 hours to be the upper limit while building my model.
+
+Lets see if the time of the day has any impact on the distance covered.
+
+```{r  , echo=TRUE}
+df$hour <- as.POSIXlt(anytime(as.factor(df$lpep_pickup_datetime)))$hour
+temp <- aggregate(.~ hour, data = df,mean)[,c('hour','Trip_distance','Tip_amount')]
+temp
+
+ggplot(data = temp, aes(x = hour)) +
+  geom_line(aes(y = Trip_distance, colour = 'Mean Trip Distance')) + 
+  geom_line(aes(y = Tip_amount, colour = 'Mean Tip Amount')) +  
+  theme_bw() +
+  labs(x = "Hour of the day", y = 'Values') +
+  scale_colour_manual('Legend ',breaks = c("Mean Trip Distance", "Mean Tip Amount")
+                       ,values=c('Mean Trip Distance'="blue",'Mean Tip Amount'="red"))
+
+```
+
+An interesting observation can be interpreted here.
+
+The distance covered here during the 5th and 6th hour are highest along with the tip recieved. This could be true as people travelling early in the morning to work would need to get on time. While coming back from work they wouldn't mind cathing a local transportation system. Also subsequently it reduces through out the day utill it reaches late night till the morning. I believe this would be high mainly beacuse of the number of rides seen on weekends, which definetly would have an impact on these late night rides.
+
+```{r  , echo=TRUE}
+gc()
+
+#latitude and longtitude other than the area covered by Green Taxis
+temp <- data.frame(df$Pickup_longitude, df$Pickup_latitude)
+colnames(temp) = c('lon','lat')
+
+usa_center = as.numeric(geocode("United States"))
+
+USAMap = ggmap(get_googlemap(center=usa_center, scale=2, zoom=4), extent="panel")
+USAMap +
+  geom_point(aes(x=lon, y=lat), data=temp, col="orange", alpha=0.4) 
+```
+
+From this visualization it is clear that some of the coordinates fall out of the actual area of service. These coordinates need to be scrapped off and for future purposes these also need to be investigated. While plotting, it was noticed that 1985 observations had coordinates outside of USA. Interesting?
+
+Coordinates outside of area of service (bounding box) are set to NA (reference taken from https://www.maptechnica.com/city-map/New%20York/NY/3651000). According to this, the bounding box limits are latitude=40.917577, longitude=-74.259090 at the northwest corner, and latitude=40.477399, longitude=-73.700272 at the southeast corner
+
+```{r  , echo=TRUE}
+
+ndf <- data.frame(Dropoff_longitude=df$Dropoff_longitude
+                 ,Dropoff_latitude=df$Dropoff_latitude
+                 ,Pickup_longitude=df$Pickup_longitude
+                 ,Pickup_latitude=df$Pickup_latitude)
+
+nw <- list(lat = 40.917577, lon = -74.259090)
+se <- list(lat = 40.477399, lon = -73.700272)
+
+ind <- which(df$Dropoff_longitude < nw$lon | df$Dropoff_longitude > se$lon)
+ndf$Dropoff_longitude[ind] <- NA
+
+ind <- which(df$Pickup_longitude < nw$lon | df$Pickup_longitude > se$lon)
+ndf$Pickup_longitude[ind] <- NA
+
+ind <- which(df$Dropoff_latitude < se$lat | df$Dropoff_latitude > nw$lat)
+ndf$Dropoff_latitude[ind] <- NA
+
+ind <- which(df$Pickup_latitude < se$lat | df$Pickup_latitude > nw$lat)
+ndf$Pickup_latitude[ind] <- NA
+
+na_count <- sapply(ndf, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+na_count
+
+```
+
+As it can be seen there are latitudes and longtitudes outside of the area of service. 
+
+```{r  , echo=TRUE}
+# 0 passenger count
+nrow(df[df$Passenger_count == 0,])
+```
+
+Here we notice that the passenger count in some of these rides were zero. This is obviously incorrect, but instead of deleting these rows, it would be better to replace 0 with the median number of passengers, since there are fares recorded with those rides and tips to. Also, the median was chosen as the its histogram was skewed.
+
+```{r  , echo=TRUE}
+# More than 7 passenger count
+nrow(df[df$Passenger_count > 8,])
+```
+
+Another observation was that since the number of max passengers that can travel is only 7, we can exclude those rows that have more than 7 passengers
+
+Also there were a few more anomalies that were observed which needed to be cleaned up. After reviewing the rates (from "http://www.nyc.gov/html/tlc/html/passenger/taxicab_rate.shtml"), it was observed that the minimum fare for a ride is $2.5. From the data it can be observed that some of the rides were less than the minimum amount.
+
+```{r  , echo=TRUE}
+# Fare Amount less than 2.5
+nrow(df[df$Fare_amount < 2.50,])
+```
+
+7455 rows have fare amount < 2.5 which can't be possible. 
+
+Looking at a bit deeper, fare amount from different vendors, Creative Mobile Technologies and VeriFone Inc. 
+
+```{r  , echo=TRUE}
+nrow(df[df$Fare_amount < 0 & df$VendorID == 2,])
+nrow(df[df$Fare_amount < 0 & df$VendorID == 1,])
+```
+
+I see that vendor ID 2 has a an issue recording fares at times. All the fares that
+have values less than 0 (wrongly recorded negative values) are derived only from the second vendor (i.e. Vendor ID = 2, VeriFone Inc). This should be further investigated, to avoid loss and erors in data. As of now, I'll convert all the negative data to positive to avoid loss in data.
+
+```{r  , echo=TRUE}
+neg.vars <- c('Fare_amount','Extra','improvement_surcharge','Total_amount','MTA_tax','Tip_amount')
+
+df[df$Fare_amount < 0,][neg.vars] <- df[df$Fare_amount < 0,][neg.vars]*-1
+
+#Removing Fare amount less than 2.5
+df <- subset(df,df[,'Fare_amount'] >= 2.5)
+
+# Distances greater then 0
+df <- subset(df,df[,11] > 0) 
+nrow(df)
+
+#Trip Durations greater then 4 hrs
+df <- subset(df,df[,21] < (4*3600))
+
+#remove trip Durations less then 2min
+df <- subset(df,df[,21] > (2*60))
+nrow(df)
+
+# set coordinates outside of NYC bounding box to NA(reference taken from 
+# https://www.maptechnica.com/city-map/New%20York/NY/3651000)
+nw <- list(lat = 40.917577, lon = -74.259090)
+se <- list(lat = 40.477399, lon = -73.700272)
+ind <- which(df$Dropoff_longitude < nw$lon | df$Dropoff_longitude > se$lon)
+df$Dropoff_longitude[ind] <- NA
+ind <- which(df$Pickup_longitude < nw$lon | df$Pickup_longitude > se$lon)
+df$Pickup_longitude[ind] <- NA
+ind <- which(df$Dropoff_latitude < se$lat | df$Dropoff_latitude > nw$lat)
+df$Dropoff_latitude[ind] <- NA
+ind <- which(df$Pickup_latitude < se$lat | df$Pickup_latitude > nw$lat)
+df$Pickup_latitude[ind] <- NA
+nrow(df)
+df <- df[complete.cases(df),]
+nrow(df)
+
+# passengers < 7
+df <- subset(df,df[,10] < 7)
+
+# Replace passengers with zero count with the median value i.e. 1
+df$Passenger_count[df$Passenger_count == 0] <- 1
+
+# Since payment types other than credit card have zero tips 99% of the time
+df <- subset(df, Payment_type == 1)
+
+```
+#####################################################################
+
+# Collinearity plot
+
+Looking at relations we might have missed
+
+```{r  , echo=TRUE}
+nums <- sapply(df, is.numeric) #taking only numeric class
+num.df <- df[ , nums]
+gc()
+corrplot(cor(num.df[,-16]), method = "number",tl.cex = 0.5,type="lower",diag=FALSE)
+```
+
+# Redo
+
+According to this correaltion plot, 
+
+1) The trip distance and fare amount is positively corelated, and so is the total amount. Its understandable as higher the distance travelled, the higher the fare amounts to.
+
+2) Surprisingly the tip amount isn't that highly related to the fare amount, this might be because of the number of tips recorded for cash type payment is NULL.
+
+3) The trip type is highly related to the ratecode id and the other taxes, which makes perfect sense as pointed out earlier.
+
+# Feature engineering: new derived features
+
+```{r  , echo=TRUE}
+df$Tip_percent <- (df$Tip_amount/df$Total_amount)*100
+
+clean_datetime <- df %>%
+  mutate(lpep_pickup_datetime = ymd_hms(lpep_pickup_datetime)) %>%
+  mutate(Lpep_dropoff_datetime = ymd_hms(Lpep_dropoff_datetime)) %>% 
+  mutate(weekday_pickup = weekdays(lpep_pickup_datetime)) %>%
+  mutate(weekday_dropoff= weekdays(Lpep_dropoff_datetime))%>%
+  mutate(hpick = hour(lpep_pickup_datetime)) %>%
+  mutate(date1 = date(lpep_pickup_datetime))
+
+#from the above code we get derived features such as weekday pickup,hour of pickup
+
+temp <- clean_datetime %>% 
+  group_by(weekday_pickup) %>%
+  summarize(Count_Trips = n(), avg_dist = mean(Trip_distance), 
+            avg_passengers = mean(Passenger_count), 
+            avg_price = mean(Total_amount),
+            avg_Tip = mean(Tip_amount),
+            Total_tip = sum(Tip_amount))
+
+temp[c(2,5,3,4,1,6,7),] <- temp[c(1,2,3,4,5,6,7),]
+temp$ratio <- temp$avg_Tip/temp$avg_dist
+
+temp
+
+```
+
+
+```{r  , echo=TRUE}
+ggplot(temp, aes(x = factor(weekday_pickup),group = 1)) +   
+  geom_point(aes(y = avg_Tip), color = 'red') +
+  geom_line(aes(y = avg_Tip), color = 'blue') +
+  geom_point(aes(y = avg_dist), color = 'black') +
+  geom_line(aes(y = avg_dist), color = 'cyan') +
+  theme_bw() +
+  xlab('Days of the Week') +
+  ylab('Avg Tip / Avg Distance') +
+  annotate("text", x = 2.0, y = 3.62, label = "Average Distance") +
+  annotate("text", x = 3.1, y = 2.75, label = "Average Tips") +
+  scale_x_discrete(limits=temp$weekday_pickup)
+
+```
+
+from the above graph and table above we notice The maximum distance was on Sunday and the maximum avg tip/ total tip amount recieved was on Saturday followed by Friday. There's a straight dip in tips on Monday. This can be accounted as people like to go out on weekends and won't hesitate to spend a little more, on the other hand they wouldn't do the same on a weekday. Let's compare the ratio's of the distance to tip.
+
+```{r  , echo=TRUE}
+ggplot(temp, aes(x = factor(weekday_pickup)
+                 ,group = 1)) +   
+  geom_point(aes(y = ratio, size = Count_Trips), color = 'yellow') + 
+  geom_line(aes(y = ratio), color = 'green') +
+  theme_light() +
+  xlab('Days of the Week') +
+  ylab('Tip Recieved / Distance Travelled') +
+  scale_x_discrete(limits=temp$weekday_pickup) +
+  scale_size_continuous(range = c(5,20)) +
+ theme(legend.position="right")
+
+```
+
+There's a massive dip on Sunday's, which drivers might be unaware of. They don't get a good return on their trips on Sunday. The intensity of each point describes the average number of rides given at that day. From the graph, we see that Thursday and Wednesday have the best ratio's, inturn giving the best returns, although it doesn't graph doesn't show us the total tips recieved that day. If one looks to save time and wants the best on its retun, they should work through the weekdays (Wednesday, Thursday); else, if the driver has time and wants to earn a bit more, it would be smarter to work on weekends as the ratio difference betwwen Thurs and Sunday isn't that high. 
+
+Combining this knowledge recieved and our our previous plot on tip recieved by the hour, we can get a detailed explaination on when and what time can one maximize their tips
+
+
+```{r  , echo=TRUE}
+temp <- clean_datetime %>%
+  group_by(hour,weekday_pickup) %>%
+  summarise(Mean_Tip = mean(Tip_amount))
+  
+ggplot(temp, aes(hour, Mean_Tip)) +
+  geom_point() +
+  geom_line() +
+  theme_bw() +
+  facet_wrap(~factor(weekday_pickup)) +
+  labs(x = 'Hour of the day', y = 'Mean Tip')
+```
+
+### A closer look into these plots
+
+#### Tips recieved before Noon during the week
+
+```{r  , echo=TRUE}
+ggplot(temp[temp$hour <= 12,], aes(hour, Mean_Tip)) +
+  geom_point() +
+  geom_line() +
+    theme_bw() +
+  facet_wrap(~factor(weekday_pickup)) +
+  labs(x = 'Hours before Noon', y = 'Mean Tip', Title = 'Tip recieved before 12pm')
+```
+
+As it can be see, morning 5 pm can be a good time to earn some tips on days like Friday, Monday, Thursday, Tuesday and Wednesday.
+
+#### Tips recieved after Noon during the week
+
+```{r  , echo=TRUE}
+ggplot(temp[temp$hour > 12,], aes(hour, Mean_Tip)) +
+  geom_point() +
+  geom_line() +
+    theme_bw() +
+  facet_wrap(~factor(weekday_pickup)) +
+    labs(x = 'Hours after Noon', y = 'Mean Tip')
+
+df$weekday_num<-as.integer(format(as.Date(df$lpep_pickup_datetime),"%w"))
+```
+
+From this we can confirm the best time to work at night after 9 pm is on Saturday, followed by Tuesday and Wednesday (Surprising?)
+
