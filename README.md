@@ -1,4 +1,4 @@
-# Big-data
+# Big-data_R
 Predicting Tips for Green taxis in NYC using R
 
 An analysis on what factors could contribute to a higher tips in the city of New York. Helping drivers understand patterns
